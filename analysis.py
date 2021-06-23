@@ -16,7 +16,7 @@ import sys
 import json
 sys.path.append("./code/")
 from cluster import *
-from matches import *
+from match import *
 
 # Compute pairwise correlation in size
 def pairwiseCorrelations(clusterMatches, dataPath='', experimentPath=''):
