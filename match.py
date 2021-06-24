@@ -6,6 +6,85 @@
 from cluster import *
 
 
+def invert_matches(matches, clusters):
+    """
+    Invert the map of clusters to the lists of clusters that they matched with.
+
+    :param matches: a dict mapping clusters (i.e., lists of amino acid sequence
+    indices) to lists of clusters that they match with 
+    :param clusters: the range of clusters in the matches mapping
+    :returns: a dict mapping clusters from the range of the matches mapping to
+    the clusters from its domain that matched with them
+    :returns: a list of unmatched clusters from the range of the matches mapping
+    """
+    inverted = {}
+    for cluster in matches:
+        for match in matches[cluster]:
+            if match in inverted.keys():
+                inverted[match].append(cluster)
+            else:
+                inverted[match] = [cluster]
+    for match in inverted:
+        inverted[match] = list(set(inverted[match]))
+
+    return inverted, list(set(clusters) - set(inverted.keys()))
+
+
+def traverse_matches(matches1, matches2, cluster, clusters1, clusters2, \
+                     visited1, visited2, first):
+    """
+    TODO
+
+    :param matches1: a dict mapping clusters (i.e., lists of amino acid sequence
+    indices) to lists of matching clusters
+    :param matches2: a dict mapping clusters to lists of matching clusters
+    :param cluster: a cluster from which to start the traversal
+    :param clusters1: a list of clusters in matches1 that have been visited
+    :param clusters2: a list of clusters in matches2 that have been visited
+    :param visited1: a dict mapping clusters of matches1 to True iff visited
+    :param visited2: a dict mapping clusters of matches2 to True iff visited
+    :param first: True iff the next matches graph to traverse is matches1
+    """
+    if first:  # Traverse matches1.
+        visited1[cluster] = True
+        clusters1 += [cluster]
+        for match in matches1[cluster]:
+            if not visited2[match]:
+                traverse_matches(matches1, matches2, match, clusters1, \
+                                 clusters2, visited1, visited2, not first)
+    else:  # Traverse matches2.
+        visited2[cluster] = True
+        clusters2 += [cluster]
+        for match in matches2[cluster]:
+            if not visited1[match]:
+                traverse_matches(matches1, matches2, match, clusters1, \
+                                 clusters2, visited1, visited2, not first)
+
+
+def consolidate_matches(matches1, matches2):
+    """
+    TODO: Documentation.
+
+    :param matches1: TODO
+    :param matches2: TODO
+    :returns: TODO
+    """
+    visited1, visited2 = {}, {}
+    for cluster in matches1:
+        visited1[cluster] = False
+    for cluster in matches2:
+        visited2[cluster] = False
+
+    multiGraph={}
+    for cluster in visited1:
+        clusters1, clusters2 = [], []
+        if not visited1[cluster]:
+            traverse_matches(matches1, matches2, cluster, clusters1, \
+                             clusters2, visited1, visited2, first=True)
+            multiGraph[cluster] = {'g1': clusters1, 'g2': clusters2}
+    return multiGraph
+
+
 def generate_nbr_seqs(amino_seq, dist_metric='Hamming'):
     """
     Generates all amino acid sequences within distance 1 of the given sequence.
@@ -38,7 +117,7 @@ def generate_nbr_seqs(amino_seq, dist_metric='Hamming'):
 
 def clusterDistance(c1,c2,inter=''):
     """
-    TODO
+    TODO: Is this unused, or is this the Earth Mover's Distance?
     """
     if inter=='':
         inter=set()
@@ -236,29 +315,16 @@ def matchExperimentsBack(files):
     return clusterMatches
 
 
-def invertGraph(graph,groups):
-    graph2={}
-    for v in graph:
-        for v2 in graph[v]:
-            if v2 in graph2.keys():
-                graph2[v2]+=[v]
-            else:
-                graph2[v2]=[v]
-    for v in graph2:
-        graph2[v]=list(set(graph2[v]))
-    return graph2, list(set(groups).difference(set(graph2.keys())))
-
-
-def matchExperiments(files,dataPath='',experimentPath=''):
+def matchExperiments(files, data_path='', exp_path=''):
     clusterMatches={}
     ## There is some redundant computation (because of symetry) but I leave them now for a sanity check
     for x,file1 in enumerate(files):
 
-        experiment1=load_data_object(file1,dataPath=dataPath,experimentPath=experimentPath)
+        experiment1=load_data_object(file1,dataPath=data_path,experimentPath=exp_path)
         #experiment1.fname = path + experiment1.fname.split('/')[-1]
         clusterMatches[file1]={}
         for y,file2 in enumerate(files):
-            experiment2 = load_data_object(file2,dataPath=dataPath,experimentPath=experimentPath)
+            experiment2 = load_data_object(file2,dataPath=data_path,experimentPath=exp_path)
             #experiment2.fname = path + experiment2.fname.split('/')[-1]
 
             if x < y:
@@ -266,51 +332,17 @@ def matchExperiments(files,dataPath='',experimentPath=''):
                 graph,missing=match_clusters(experiment1,experiment2)
                 clusterMatches[file1][file2]['graph'] = graph
                 clusterMatches[file1][file2]['missing'] = missing
-                with open(experimentPath+'matches.pickle', 'wb') as f:
+                with open(exp_path+'matches.pickle', 'wb') as f:
                     pickle.dump(clusterMatches, f)
             elif x > y:
                 clusterMatches[file1][file2] = {}
-                graph,missing=invertGraph(clusterMatches[file2][file1]['graph'],experiment1.experiment_log.keys())
+                graph,missing=invert_matches(clusterMatches[file2][file1]['graph'],experiment1.experiment_log.keys())
                 clusterMatches[file1][file2]['graph'] = graph
                 clusterMatches[file1][file2]['missing'] = missing
-                with open(experimentPath+'matches.pickle', 'wb') as f:
+                with open(exp_path+'matches.pickle', 'wb') as f:
                     pickle.dump(clusterMatches, f)
 
-
     return clusterMatches
-
-
-def doubleTraverse(G1, G2, v, nodesG1, nodesG2, visitadoG1, visitadoG2, which):
-    if which:
-        visitadoG1[v] = True
-        nodesG1 += [v]
-        for v2 in G1[v]:
-            if not visitadoG2[v2]:
-                doubleTraverse(G1, G2, v2, nodesG1, nodesG2, visitadoG1, visitadoG2, not which)
-    else:
-        visitadoG2[v] = True
-        nodesG2 += [v]
-        for v2 in G2[v]:
-            if not visitadoG1[v2]:
-                doubleTraverse(G1, G2, v2, nodesG1, nodesG2, visitadoG1, visitadoG2, not which)
-
-
-def consolidateGraph(g1,g2):
-    visitadoG1={}
-    for v in g1:
-        visitadoG1[v]=False
-    visitadoG2={}
-    for v in g2:
-        visitadoG2[v]=False
-
-    multiGraph={}
-    for v in visitadoG1:
-        nodesG1=[]
-        nodesG2=[]
-        if not visitadoG1[v]:
-            doubleTraverse(g1,g2,v,nodesG1,nodesG2,visitadoG1,visitadoG2,True)
-            multiGraph[v]={'g1':nodesG1,'g2':nodesG2}
-    return multiGraph
 
 
 # We assume unrepeated strings. Other wise we would need to read the file

@@ -1,22 +1,12 @@
-from scipy.stats import spearmanr, stats
-from scipy.spatial.distance import euclidean
-from random import randint, shuffle,sample,random
-from os import listdir
-from os.path import isfile, join
-import numpy as np
-import matplotlib.pyplot as plt
-import pandas as pd
-import datetime
-from time import time
-import pickle
-import networkx as nx
-from math import isinf, exp
-import random
-import sys
-import json
-sys.path.append("./code/")
-from cluster import *
+# Project:   PublicClusters
+# Filename:  analysis.py
+# Authors:   Fernando Esponda (fernando.esponda@itam.mx) and Joshua J. Daymude
+#            (jdaymude@asu.edu).
+
 from match import *
+
+import numpy as np
+
 
 # Compute pairwise correlation in size
 def pairwiseCorrelations(clusterMatches, dataPath='', experimentPath=''):
@@ -38,7 +28,7 @@ def pairwiseCorrelations(clusterMatches, dataPath='', experimentPath=''):
             g1 = clusterMatches[f1][f2]['graph']
             g2 = clusterMatches[f2][f1]['graph']
 
-            multiGraph = consolidateGraph(g1, g2)
+            multiGraph = consolidate_matches(g1, g2)
             x = []
             y = []
             experiment2 = load_data_object(f2, dataPath, experimentPath)
