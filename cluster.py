@@ -4,12 +4,11 @@
 #            (jdaymude@asu.edu).
 
 import argparse
-import datetime
 from os import listdir
-from os.path import isfile, join
+from os.path import basename, isfile, join, normpath
 import pandas as pd
 import pickle
-from time import time
+from tqdm import tqdm
 
 
 def amino_acids():
@@ -81,26 +80,17 @@ def amino_acid_dists():
     return min_dist_amino
 
 
-def read_data(fname, dataset='esponda2020'):
+def read_data(fname, dataset):
     """
     Reads data from the given file as a DataFrame, removing all columns except
     the amino acid sequences and counts, grouping and sorting rows by count.
 
-    :param fname: a string file name to read from (should be a .csv or .tsv)
+    :param fname: a string file name to read from (should be .tsv)
     :param dataset: a string dataset name ('esponda2020' or 'emerson2017')
     :returns: a DataFrame containing amino acid sequences and their counts
     """
-    # Determine the file extension and corresponding separator.
-    fext = fname.split('.')[-1]
-    if fext == 'csv':
-        sep = ','
-    elif fext == 'tsv':
-        sep = '\t'
-    else:
-        raise ValueError('fname \"' + fname + '\" must be .csv or .tsv')
-    
     # Read the data as a DataFrame, renaming columns according to the dataset.
-    df = pd.read_csv(fname, sep=sep)
+    df = pd.read_csv(fname, sep='\t')
     if dataset == 'esponda2020':
         col_map = {'aminoAcid': 'amino_seq', 'count (templates/reads)': 'count'}
     elif dataset == 'emerson2017':
@@ -108,6 +98,8 @@ def read_data(fname, dataset='esponda2020'):
     else:
         raise ValueError('unrecognized dataset \"' + dataset + '\"')
     df = df.rename(columns=col_map)
+
+    # Group by amino acid sequence and sort from most to least reads.
     df = df.groupby('amino_seq', as_index=False)['count'].sum()
     df = df.sort_values(by=['count'], ascending=False)
 
@@ -141,7 +133,7 @@ def close_to(amino_seq, repertoire, dist_metric='Hamming'):
                 if one_sub in repertoire.keys():
                     nbr_seq_idxs.add(repertoire[one_sub])
                     repertoire.pop(one_sub)
-                # Insert amino acid a just before the i-th amino acid. 
+                # Insert amino acid a just before the i-th amino acid.
                 one_insert = amino_seq[0:i] + a + amino_seq[i:]
                 if one_insert in repertoire.keys():
                     nbr_seq_idxs.add(repertoire[one_insert])
@@ -161,22 +153,24 @@ def close_to(amino_seq, repertoire, dist_metric='Hamming'):
     return nbr_seq_idxs
 
 
-def dbscan(df_amino, max_clusters, min_cluster_size):
+def dbscan(df_amino, min_cluster_size, verbose):
     """
     Implements the DBSCAN algorithm to find at most the given maximum number of
     clusters each containing at least the given minimum number of amino acid
     sequences from the amino acid data.
 
     :param df_amino: a DataFrame containing a column of amino acid sequences
-    :param max_num_clusters: an integer maximum number of clusters to find
     :param min_cluster_size: an integer minimum number of sequences per cluster
+    :param verbose: True iff progress info should be printed
     :returns: a list of clusters, each of which are lists of sequence indices
     """
     repertoire = dict(zip(df_amino['amino_seq'], df_amino.index))
     repertoire_idxs = set(df_amino.index.values)
     clusters = []
 
-    while len(clusters) < max_clusters and len(repertoire_idxs) > 0:
+    # While there are enough unclustered sequences to possibly form another
+    # cluster, find one cluster from among the unclustered sequences.
+    while len(repertoire_idxs) > min_cluster_size:
         explore_idxs = set([repertoire_idxs.pop()])
         cluster = []
         while len(explore_idxs) > 0:
@@ -188,218 +182,108 @@ def dbscan(df_amino, max_clusters, min_cluster_size):
 
         if len(cluster) >= min_cluster_size:
             clusters.append(cluster.copy())
+            if verbose:
+                print('Found cluster #{} containing {} sequences'\
+                      .format(len(clusters), len(cluster)))
 
     return clusters
 
 
-def extract_equivalent_cluster(cluster, cluster_fname, other_fname):
+class ClusterSet:
     """
-    TODO: Documentation. This is for extracting equivalent groups.
-
-    :param cluster: a cluster TODO
-    :param cluster_fname: a string file name TODO
-    :param other_fname: a string file name TODO
-    :returns: TODO
-    """
-    # Create both DataFrames and compute their total number of reads.
-    cluster_df, other_df = read_data(cluster_fname), read_data(other_fname)
-    cluster_count_tot = cluster_df['count'].sum()
-    other_count_tot = other_df['count'].sum()
-
-    # Drop all rows except those in the cluster and mark their indices with 'a'.
-    cluster_df = cluster_df.loc[cluster]
-    cluster_df.index = [str(i) + 'a' for i in range(len(cluster_df))]
-
-    # Combine these marked cluster rows with the other dataset and use DBSCAN to
-    # find a cluster in the combined data. Because this combined data includes
-    # the original cluster, the new cluster contains the original cluster and
-    # neighboring sequences from the other data. Dropping the marked rows leaves
-    # behind an "equivalent" cluster of rows from the other data.
-    combined_df = pd.concat([cluster_df, other_df])
-    equiv_cluster = dbscan(combined_df[['amino_seq']], max_clusters=1, min_cluster_size=30)
-    equiv_cluster = [idx for idx in equiv_cluster[0] if str(idx)[-1] != 'a']
-
-    # Compute the number of reads for the original and equivalent clusters'
-    # sequences.
-    cluster_count = cluster_df['count'].sum()
-    equiv_count = other_df.loc[equiv_cluster]['count'].sum()
-
-    return equiv_cluster, other_df, cluster_count_tot, other_count_tot, cluster_count, equiv_count
-
-
-class cluster_obj:
-    """
-    TODO: Documentation.
+    A collection of clusters from the same individual's sequencing data.
     """
 
-    def __init__(self, desc, seq_idxs):
-        self.desc = desc
-        self.cluster = seq_idxs
-        self.equivalent_groups = {}
-
-
-    def set_within_metric(self, number_of_amino_in, number_of_amino_out, number_of_amino_tot, number_of_amino_leaked):
-        self.number_of_amino_in = number_of_amino_in
-        self.number_of_amino_out = number_of_amino_out
-        self.number_of_amino_tot = number_of_amino_tot
-        self.number_of_amino_leaked = number_of_amino_leaked
-
-
-    def set_equivalent_group(self, desc, fname, other_fname):
+    def __init__(self, id, datapath, cluster_frac):
         """
-        TODO: Documentation.
+        Initializes a new ClusterSet.
 
-        :param desc: a string description of TODO
-        :param fname: a string file name of TODO
-        :param other_fname: a string file name of TODO
+        :param id: a string identifier for this ClusterSet
+        :param datapath: a string file path to the dataset directory
+        :param cluster_frac: a float representing the fraction of total
+        sequences that must appear in a cluster for it to be recorded
         """
-        equiv_cluster, other_df, cluster_count_tot, other_count_tot, cluster_count, equiv_count = \
-            extract_equivalent_cluster(self.cluster, fname, other_fname)
-        exp = cluster_obj(desc, equiv_cluster)
-
-        exp.set_within_metric(*evaluate_within(other_df, equiv_cluster)) #comented for other data
-        self.equivalent_groups[other_fname] = {'cluster_obj': exp, \
-                                                   'sizes': (other_count_tot, cluster_count_tot, equiv_count,
-                                                             cluster_count),
-                                                   'relative_sizes': (1.0 * equiv_count / other_count_tot,
-                                                                      1.0 * cluster_count / cluster_count_tot)}
+        self.id = id
+        self.dataset = basename(normpath(datapath))
+        self.seq_df = read_data(join(datapath, id + '.tsv'), self.dataset)
+        self.min_cluster_size = max(int(cluster_frac * len(self.seq_df)), 5)
+        self.clusters = []           # List of lists of sequence indices.
+        self.clustered_seqs = set()  # Union of sequence indices in clusters.
 
 
-class experiment:
-    """
-    TODO: Documentation.
-    """
-
-    def __init__(self, description, fname):
-        self.description = description
-        self.fname = fname
-        self.exp_number = 0
-        self.experiment_log = {}
-        self.explored_set = []
-
-
-    def add_experiment(self, cluster, df=''):
-        self.explored_set += cluster
-        self.exp_number += 1
-        exp = cluster_obj(self.description, cluster)
-        if len(df) == 0:
-            df = read_data(self.fname)
-        exp.set_within_metric(*evaluate_within(df, cluster))  # method outside class for now
-        self.experiment_log[self.exp_number] = exp
-
-
-    def set_equivalent_groups(self, description, other_file_name, groups=[]):
+    def find_clusters(self, verbose=True):
         """
-        TODO: Only used in unused functions (commented out in a used function).
-        """
-        for g in groups:
-            if g in self.experiment_log.keys():
-                self.experiment_log[g].set_equivalent_group(description, self.fname, other_file_name)
+        Finds all clusters in the ClusterSet's sequence data that contain at
+        least the given fraction of total sequences.
 
-    
-    def save(self, fname):
+        :param verbose: True iff progress info should be printed
+        """
+        self.clusters = dbscan(self.seq_df, self.min_cluster_size, verbose)
+        for cluster in self.clusters:
+            self.clustered_seqs |= set(cluster)
+
+        if verbose:
+            print('==> Found {} clusters clustering {} of {} total sequences'\
+                  .format(len(self.clusters), len(self.clustered_seqs), \
+                          len(self.seq_df)))
+
+
+    def save(self):
+        """
+        Saves this ClusterSet object to results/<dataset>/clusters/<id>.pkl.
+        """
+        fname = join('results', self.dataset, 'clusters', self.id + '.pkl')
         with open(fname, 'wb') as f:
             pickle.dump(self, f)
 
 
-    def find_clusters(self, cluster_frac):
-        """
-        TODO: Documentation.
-        """
-        df = read_data(self.fname)
-        min_cluster_size = max(int(cluster_frac * len(df)), 5)  # Clusters must have at least 5 sequences.
-        num_clusters = 1
-
-        while num_clusters < 5000: ##maximim number of clusters to find
-            df = select_data_subset(df, self.explored_set)
-
-            if len(df) < min_size: #should be min size
-                print('done')
-                break
-            grupos = dbscan(df[['aminoAcid']], max_clusters=1, min_cluster_size=min_size)
-            if len(grupos) == 0:
-                break
-            self.add_experiment(grupos[0],df)  # avoid reading I think
-            '''
-            experiment1.set_equivalent_groups('Using nucleotide sequences, distance=1' + exp_number,
-                                            path + 'Spleen_2.tsv', [experiment1.exp_number])
-            experiment1.set_equivalent_groups('Using nucleotide sequences, distance=1' + exp_number,
-                                            path + 'Spleen_3.tsv', [experiment1.exp_number])
-            '''
-            num_clusters += 1
-            #print('Iteration = ', cluster_num, ' Clusters processed = ', experiment1.exp_number)
-        name = self.fname.split('/')[-1].split('.')[0] + 'Experiment' + self.exp_number + '-' + datetime.datetime.fromtimestamp(time()).strftime(
-                '%Y-%m-%d-%H')
-        self.save(name)
-
-
-# Calculate the  aminoacid 'leakage'
-def evaluate_within(df, cluster):
-    if 'vMaxResolved' not in df.columns:
-        return 1, 1, 1, 1
-    indexes_not_in_group = set(df.index.values).difference(set(cluster))
-
-    all_data = df['aminoAcid'].unique()
-    in_group = df.loc[cluster]['aminoAcid'].unique()
-    ##filter v segments
-    v_segments = df.loc[cluster]['vMaxResolved'].unique()
-    ###filter j segments
-    j_segments = df.loc[cluster]['jMaxResolved'].unique()
-    # print('I havent included j because of testing')
-    not_in_group = df.loc[
-        df.index.isin(indexes_not_in_group) & df['vMaxResolved'].isin(v_segments) & df['jMaxResolved'].isin(
-            j_segments)]['aminoAcid'].unique()
-
-    # not_in_group=df.loc[df.index.isin(indexes_not_in_group) & df['vMaxResolved'].isin(v_segments)]['aminoAcid'].unique()
-
-    amino_leaked = set(in_group).intersection(set(not_in_group))
-
-    number_of_amino_in = len(in_group)
-    number_of_amino_out = len(not_in_group)
-    number_of_amino_tot = len(all_data)
-    number_of_amino_leaked = len(amino_leaked)
-    if (len(cluster) > 0):
-        print(1.0 * number_of_amino_leaked / number_of_amino_in)
-    print(number_of_amino_in, number_of_amino_out, number_of_amino_tot, number_of_amino_leaked)
-    return number_of_amino_in, number_of_amino_out, number_of_amino_tot, number_of_amino_leaked
-
-
-def load_data_object(name,dataPath='',experimentPath=''):
+def load_clusterset(fname):
     """
-    TODO: Unused, but clearly the complement of experiment.save().
+    Loads a ClusterSet from the given file.
+
+    :param fname: a string file name to load the ClusterSet from
+    :returns: the ClusterSet loaded from file
     """
-    name=experimentPath+name.split('/')[-1]
-    with open(name,'rb') as fp:
-        data_object=pickle.load(fp)
-    data_object.fname = dataPath + data_object.fname.split('/')[-1]
-    return data_object
+    with open(fname, 'rb') as f:
+        return pickle.load(f)
 
 
-def select_data_subset(df,explored_indexes):
-    indexes_not_explored=set(df.index.values).difference(set(explored_indexes))
-    return df.loc[indexes_not_explored]
+def cluster_one(id, datapath, cluster_frac, verbose=True):
+    """
+    Perform clustering on the given individual, writing results to file.
+
+    :param id: a string identifier for the individual
+    :param datapath: a string file path to the dataset directory
+    :param verbose: True iff progress info should be printed
+    """
+    cs = ClusterSet(id, datapath, cluster_frac)
+    cs.find_clusters(verbose)
+    cs.save()
+
+
+def cluster_all(datapath, cluster_frac):
+    """
+    Iteratively find clusters for all individuals in the given dataset.
+
+    :param datapath: a string file path to the dataset directory
+    """
+    files = [f for f in listdir(datapath) if isfile(join(datapath, f))]
+    for f in tqdm(files, desc='Clustering individual'):
+        cluster_one(f.split('.')[0], datapath, cluster_frac, len(files) == 1)
 
 
 if __name__ == "__main__":
     # Parse command line arguments.
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('-E', '--exps', type=str, default='exps/', \
-                        help='path to experiments directory')
-    parser.add_argument('-D', '--data', type=str, default='data/', \
-                        help='path to data directory')
-    parser.add_argument('-F', '--file', type=str, default='all', \
-                        help='TODO: what is this?')
-    parser.add_argument('-S', '--size', type=float, default=0.001, \
-                        help='Minimum cluster size as fraction of repertoire')
+    parser.add_argument('-I', '--id', type=str, default='all', \
+                        help='ID of individual to cluster or \'all\'')
+    parser.add_argument('-D', '--datapath', type=str, required=True, \
+                        help='Path to the data directory e.g. data/esponda2020')
+    parser.add_argument('-F', '--cluster_frac', type=float, default=0.001, \
+                        help='Minimum cluster size as fraction of #sequences')
     args = parser.parse_args()
 
-    if args.file == 'all':  # Running all files in path.
-        files = [f for f in listdir(args.data) if isfile(join(args.data, f))]
-        for file in files:
-            exp = experiment('Using amino acid sequences, distance=1', join(args.data, file))  # TODO: better description.
-            exp.exp_number = '1'
-            exp.find_clusters(args.size)
-    else:  # Running one file.
-        exp = experiment('Using amino acid sequences, distance=1', join(args.data, args.file))
-        exp.exp_number = '1'
-        exp.find_clusters(args.size)
+    if args.id == 'all':  # Cluster all individuals in the given dataset.
+        cluster_all(args.datapath, args.cluster_frac)
+    else:  # Cluster a single individual.
+        cluster_one(args.id, args.datapath, args.cluster_frac)

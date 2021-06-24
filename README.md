@@ -1,6 +1,32 @@
 # RCA 
  Clustering matching and comparison algorithms for TCR repertoires
 
+
+## Getting Started
+
+TODO: describe. File structure is:
+
+```
+data
+|--- emerson2017
+|--- |--- TODO
+|--- |--- ...
+|--- esponda2020
+|--- |--- Spleen_1.tsv
+|--- |--- Spleen_2.tsv
+|--- |--- Spleen_3.tsv
+results
+|--- emerson2017
+|--- |--- clusters
+|--- |--- matches
+|--- esponda2020
+|--- |--- clusters
+|--- |--- matches
+```
+
+TODO: Explain how to configure new datasets. Need to add folders as above, choice to argparse, and an elif case in cluster::read_data
+
+
 ## Terminology
 
 The following is terminology that will be used throughout the documentation and code.

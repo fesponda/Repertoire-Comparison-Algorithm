@@ -1,6 +1,6 @@
 # Non-code folders
 data/*
-exps/*
+results/*
 
 
 # Byte-compiled / optimized / DLL files
