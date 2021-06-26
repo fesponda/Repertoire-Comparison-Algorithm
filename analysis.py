@@ -8,6 +8,75 @@ from match import *
 import numpy as np
 
 
+# We assume unrepeated strings. Other wise we would need to read the file
+'''
+a1=read_data(experiment1.fname)
+s=set(a1.loc[experiment1.experiment_log[i].group_indexes]['aminoAcid'])
+'''
+def group_size(experiment1,groups,relative=True):
+    tam=0
+    for i in groups:
+        tam+=len(experiment1.experiment_log[i].group_indexes)
+    if relative:
+        return 100*tam/len(experiment1.explored_set)
+    return tam
+
+
+def traverse_matches(matches1, matches2, cluster, clusters1, clusters2, \
+                     visited1, visited2, first):
+    """
+    TODO
+
+    :param matches1: a dict mapping clusters (i.e., lists of amino acid sequence
+    indices) to lists of matching clusters
+    :param matches2: a dict mapping clusters to lists of matching clusters
+    :param cluster: a cluster from which to start the traversal
+    :param clusters1: a list of clusters in matches1 that have been visited
+    :param clusters2: a list of clusters in matches2 that have been visited
+    :param visited1: a dict mapping clusters of matches1 to True iff visited
+    :param visited2: a dict mapping clusters of matches2 to True iff visited
+    :param first: True iff the next matches graph to traverse is matches1
+    """
+    if first:  # Traverse matches1.
+        visited1[cluster] = True
+        clusters1 += [cluster]
+        for match in matches1[cluster]:
+            if not visited2[match]:
+                traverse_matches(matches1, matches2, match, clusters1, \
+                                 clusters2, visited1, visited2, not first)
+    else:  # Traverse matches2.
+        visited2[cluster] = True
+        clusters2 += [cluster]
+        for match in matches2[cluster]:
+            if not visited1[match]:
+                traverse_matches(matches1, matches2, match, clusters1, \
+                                 clusters2, visited1, visited2, not first)
+
+
+def consolidate_matches(matches1, matches2):
+    """
+    TODO: Documentation.
+
+    :param matches1: TODO
+    :param matches2: TODO
+    :returns: TODO
+    """
+    visited1, visited2 = {}, {}
+    for cluster in matches1:
+        visited1[cluster] = False
+    for cluster in matches2:
+        visited2[cluster] = False
+
+    multiGraph={}
+    for cluster in visited1:
+        clusters1, clusters2 = [], []
+        if not visited1[cluster]:
+            traverse_matches(matches1, matches2, cluster, clusters1, \
+                             clusters2, visited1, visited2, first=True)
+            multiGraph[cluster] = {'g1': clusters1, 'g2': clusters2}
+    return multiGraph
+
+
 # Compute pairwise correlation in size
 def pairwiseCorrelations(clusterMatches, dataPath='', experimentPath=''):
     result = {}

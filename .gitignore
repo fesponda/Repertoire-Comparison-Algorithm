@@ -1,6 +1,7 @@
 # Non-code folders
 data/*
-results/*
+clusters/*
+matches/*
 
 
 # Byte-compiled / optimized / DLL files
