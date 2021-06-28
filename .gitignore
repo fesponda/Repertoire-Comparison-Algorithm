@@ -3,6 +3,8 @@ data/*
 clusters/*
 matches/*
 
+# Don't ignore .gitkeep files (useful for comitting directory structure).
+!*.gitkeep
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

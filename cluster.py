@@ -98,9 +98,8 @@ def close_to(amino_seq, repertoire, dist_metric='Hamming'):
 
 def dbscan(df_amino, min_cluster_size, verbose):
     """
-    Implements the DBSCAN algorithm to find at most the given maximum number of
-    clusters each containing at least the given minimum number of amino acid
-    sequences from the amino acid data.
+    Implements the DBSCAN algorithm to find clusters of amino acid sequences
+    containing at least the given minimum number of sequences.
 
     :param df_amino: a DataFrame containing a column of amino acid sequences
     :param min_cluster_size: an integer minimum number of sequences per cluster
