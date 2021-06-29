@@ -224,8 +224,11 @@ def cluster_all(dataset, datafmt, cluster_frac):
     """
     files = listdir(join('data', dataset))
     verbose = len(files) == 1
-    for f in tqdm(files, desc='Clustering individual'):
-        cluster_one(f.split('.')[0], dataset, datafmt, cluster_frac, verbose)
+    pbar = tqdm(files)
+    for f in pbar:
+        id = f.split('.')[0]
+        pbar.set_description('Clustering ' + id)
+        cluster_one(id, dataset, datafmt, cluster_frac, verbose)
 
 
 if __name__ == "__main__":

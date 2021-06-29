@@ -127,7 +127,9 @@ def match_all(dataset):
     matches = {}
     files = listdir(join('clusters', dataset))
 
-    for i, f_i in enumerate(files):
+    pbar = tqdm(files)
+    for i, f_i in enumerate(pbar):
+        pbar.set_description('Matching ' + f_i.split('.')[0])
         cset_i = load_clusterset(join('clusters', dataset, f_i))
         matches[f_i] = {}
 
