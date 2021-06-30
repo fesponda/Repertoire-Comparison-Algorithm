@@ -9,6 +9,12 @@ match: Match clusters from distinct individuals.
 
 from cluster import *
 
+from collections import defaultdict
+from itertools import combinations
+import multiprocessing as mp
+import numpy as np
+import os
+
 
 def generate_nbr_seqs(amino_seq, dist_metric='Hamming'):
     """
@@ -115,32 +121,66 @@ def invert_matches(matches, cluster_idxs2):
     return matches_inv, list(set(cluster_idxs2) - set(matches_inv.keys()))
 
 
-def match_all(dataset):
+def match_pairs(dataset, file_pairs, queue):
     """
-    Computes matching clusters between all pairs of cluster files in the given
-    cluster directory and writes the results to file.
+    Computes matching clusters for each of the given pairs of cluster files and
+    enqueues the results in the given multiprocessing queue.
 
     :param dataset: a string dataset name
+    :param file_pairs: a list of pairs of cluster file names to match
+    :param queue: a multiprocessing.Queue for storing the resulting matches
+    """
+    matches = defaultdict(dict)
+    for f_i, f_j in tqdm(file_pairs, desc='PID{} Matching'.format(os.getpid())):
+        cset_i = load_clusterset(join('clusters', dataset, f_i))
+        cset_j = load_clusterset(join('clusters', dataset, f_j))
+        matches_ij, missing_ij = match_clusters(cset_i, cset_j)
+        matches[f_i][f_j] = {'matches': matches_ij, 'missing': missing_ij}
+
+    queue.put(matches)
+
+
+def match_all(dataset, num_procs=1):
+    """
+    Computes matching clusters between all pairs of cluster files in the given
+    dataset's clusters directory and writes the results to file.
+
+    :param dataset: a string dataset name
+    :param num_procs: an int number of processors to parallelize over
     :returns: a dict mapping cluster file names to dicts mapping cluster file
     names to dicts containing the matching and missing clusters for this pair
     """
-    matches = {}
+    # Partition pairs of file indices to match on over the number of processors.
     files = listdir(join('clusters', dataset))
+    file_pairs = [pair for pair in combinations(files, r=2)]
+    file_pair_chunks = np.array_split(file_pairs, num_procs)
 
-    pbar = tqdm(files)
-    for i, f_i in enumerate(pbar):
-        pbar.set_description('Matching ' + f_i.split('.')[0])
-        cset_i = load_clusterset(join('clusters', dataset, f_i))
-        matches[f_i] = {}
+    # Start all processes, performing matching over all unique pairs.
+    procs = []
+    queue = mp.Queue()
+    for chunk in file_pair_chunks:
+        proc = mp.Process(target=match_pairs, args=(dataset, chunk, queue,))
+        proc.start()
+        procs.append(proc)
 
-        # For efficiency, perform matching for half the pairs; then, by symmetry
-        # use inversion to obtain the other half.
+    # Collect the returned matches as the processes finish.
+    chunk_matches = []
+    for proc in procs:
+        chunk_matches.append(queue.get())
+        proc.join()
+
+    # Merge all returned matches into one dict.
+    matches = defaultdict(dict)
+    for cmatches in chunk_matches:
+        for f_i in cmatches:
+            for f_j in cmatches[f_i]:
+                matches[f_i][f_j] = cmatches[f_i][f_j]
+
+    # For efficiency, use symmetry and inversion to get the remaining matches.
+    for i, f_i in enumerate(files):
+        cset_i = load_clusterset(join('clusters', dataset, files[i]))
         for j, f_j in enumerate(files):
-            if i < j:
-                cset_j = load_clusterset(join('clusters', dataset, f_j))
-                matches_ij, missing_ij = match_clusters(cset_i, cset_j)
-                matches[f_i][f_j] = {'matches':matches_ij, 'missing':missing_ij}
-            elif i > j:
+            if i > j:
                 matches_ji = matches[f_j][f_i]['matches']
                 clusters_i = list(range(len(cset_i.clusters)))
                 matches_ij, missing_ij = invert_matches(matches_ji, clusters_i)
@@ -158,6 +198,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('-D', '--dataset', type=str, required=True, \
                         help='Dataset to perform pairwise matching on')
+    parser.add_argument('-P', '--num_procs', type=int, default=1, \
+                        help='Number of processors to parallelize over')
     args = parser.parse_args()
 
-    match_all(args.dataset)
+    match_all(args.dataset, args.num_procs)
