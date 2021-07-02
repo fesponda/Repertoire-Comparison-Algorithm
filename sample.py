@@ -36,6 +36,9 @@ def read_data(fname, datafmt):
     
     df.rename(columns = col_map)
     
+    # Group by amino acid sequence.
+    df = df.groupby('amino_seq', as_index = False)['count'].sum()
+    
     return df
 
 
@@ -152,7 +155,7 @@ def sample(fname, size, sample_type, datafmt, num_samples = 1):
                          ', expected 0 or 1')
             
         # Writes the selected data to an output file.
-        with open(sampling_path + str(date.today()) + "\\Sample" + str(i) + "\\Sample.tsv", 'a') as out_file:
+        with open(sampling_path + str(date.today()) + "\\Sample" + str(i) + "\\Sample.tsv", 'w') as out_file:
             for k in selected_dict.keys():
                 selected_data = [df.loc[k].iloc[0], selected_dict[k]]
                 tsv_writer = csv.writer(out_file, delimiter = '\t')
@@ -182,7 +185,7 @@ def sample_repeated(sampled_dict, selected_dict, size, i):
             selected_dict[seq_index] = 1;
         else:
             selected_dict[seq_index] += 1;
-    
+
 
 def sample_unique(sampled_dict, selected_dict,  size, i):
     """
