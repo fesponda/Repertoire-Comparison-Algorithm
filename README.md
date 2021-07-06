@@ -5,6 +5,8 @@ The formal description of the RCA algorithm is given in [this paper](TODO).
 
 The main components of RCA are:
 
+1. **Sampling**. TODO.
+
 1. **Clustering**. Instead of comparing repertoires at the individual amino acid sequence level, RCA first identifies *clusters* of amino acid sequences.
 A cluster is a connected component of the graph with amino acid sequences as nodes and edges between sequences that are within [Hamming distance](https://en.wikipedia.org/wiki/Hamming_distance) 1.
 The relevant code for clustering can be found in `cluster.py`.
@@ -12,8 +14,6 @@ The relevant code for clustering can be found in `cluster.py`.
 2. **Matching**. RCA then compares the clusters of two individuals, where a pair of clusters *match* if at least one sequence from the first cluster is within Hamming distance 1 of some sequence in the second cluster.
 Any cluster that does not match is considered *missing*.
 The relevant code for matching can be found in `match.py`.
-
-**TODO**: Discuss sampling.
 
 Finally, this repository also contains the analysis and plotting code used to create the paper's tables and figures in `analyze.py`.
 
@@ -42,14 +42,27 @@ data      # TCR sequencing data.
 |--- ...
 clusters  # Clusters files from cluster.py.
 |--- dataset1
-|--- |--- id1.pkl
-|--- |--- id2.pkl
+|--- |--- full
+|--- |--- |--- id1.pkl
+|--- |--- |--- id2.pkl
+|--- |--- |--- ...
+|--- |--- sample1
+|--- |--- |--- id1.pkl
+|--- |--- |--- id2.pkl
+|--- |--- |--- ...
 |--- |--- ...
+|--- |--- sampleN
+|--- |--- |--- id1.pkl
+|--- |--- |--- id2.pkl
+|--- |--- |--- ...
 |--- dataset2
 |--- ...
 matches   # Matches files from match.py.
-|--- dataset1.pkl
-|--- dataset2.pkl
+|--- dataset1
+|--- |--- sample1.pkl
+|--- |--- ...
+|--- |--- sampleN.pkl
+|--- dataset2
 |--- ...
 ```
 

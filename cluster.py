@@ -1,52 +1,17 @@
-# Project:   PublicClusters
-# Filename:  cluster.py
-# Authors:   Fernando Esponda (fernando.esponda@itam.mx) and Joshua J. Daymude
-#            (jdaymude@asu.edu).
+# Project:  PublicClusters
+# Filename: cluster.py
+# Authors:  Fabio Calo (fcalodiz@itam.mx), Joshua J. Daymude (jdaymude@asu.edu),
+#           and Fernando Esponda (fernando.esponda@itam.mx).
 
 """
 cluster: Cluster repertoires of amino acid sequences.
 """
 
+from helper import *
+
 import argparse
-from os import listdir
-from os.path import join
-import pandas as pd
-import pickle
-from tqdm import tqdm
-
-
-def amino_acids():
-    """
-    :returns: a list of the 20 amino acids and the wildcard '*'
-    """
-    return ['A', 'R', 'N', 'D', 'C', 'Q', 'E', 'G', 'H', 'I', 'L', 'K', 'M', \
-            'F', 'P', 'S', 'T', 'W', 'Y', 'V', '*']
-
-
-def read_data(fname, datafmt):
-    """
-    Reads data from the given file as a DataFrame, removing all columns except
-    the amino acid sequences and counts, grouping and sorting rows by count.
-
-    :param fname: a string file name to read from (should be .tsv)
-    :param datafmt: a string data format ('esponda2020' or 'emerson2017')
-    :returns: a DataFrame containing amino acid sequences and their counts
-    """
-    # Read the data as a DataFrame, renaming columns according to the dataset.
-    df = pd.read_csv(fname, sep='\t')
-    if datafmt == 'esponda2020':
-        col_map = {'aminoAcid': 'amino_seq', 'count (templates/reads)': 'count'}
-    elif datafmt == 'emerson2017':
-        col_map = {'amino_acid': 'amino_seq', 'reads': 'count'}
-    else:
-        raise ValueError('unrecognized data format \"' + datafmt + '\"')
-    df = df.rename(columns=col_map)
-
-    # Group by amino acid sequence and sort from most to least reads.
-    df = df.groupby('amino_seq', as_index=False)['count'].sum()
-    df = df.sort_values(by=['count'], ascending=False)
-
-    return df
+import numpy as np
+from tqdm import tqdm, trange
 
 
 def close_to(amino_seq, repertoire, dist_metric='Hamming'):
@@ -96,7 +61,7 @@ def close_to(amino_seq, repertoire, dist_metric='Hamming'):
     return nbr_seq_idxs
 
 
-def dbscan(df_amino, min_cluster_size, verbose):
+def dbscan(df_amino, min_cluster_size):
     """
     Implements the DBSCAN algorithm to find clusters of amino acid sequences
     containing at least the given minimum number of sequences.
@@ -124,9 +89,6 @@ def dbscan(df_amino, min_cluster_size, verbose):
 
         if len(cluster) >= min_cluster_size:
             clusters.append(cluster.copy())
-            if verbose:
-                print('Found cluster #{} containing {} sequences'\
-                      .format(len(clusters), len(cluster)))
 
     return clusters
 
@@ -136,7 +98,8 @@ class ClusterSet:
     A collection of clusters from the same individual's sequencing data.
     """
 
-    def __init__(self, id, dataset, datafmt, cluster_frac):
+    def __init__(self, id, dataset, datafmt, cluster_frac, sample_num=None, \
+                 sample_size=None, rng=None):
         """
         Initializes a new ClusterSet, reading an individual's sequencing data
         from data/<dataset>/<id>.tsv.
@@ -146,23 +109,32 @@ class ClusterSet:
         :param datafmt: a string data format ('esponda2020' or 'emerson2017')
         :param cluster_frac: a float representing the fraction of total
         sequences that must appear in a cluster for it to be recorded
+        :param sample_num: an int sample identifier, or None if not a sample
+        :param sample_size: an int number of sequences for the sample
+        :param rng: a numpy.random Generator for random numbers
         """
         self.id = id
         self.dataset = dataset
-        self.seq_df = read_data(join('data', dataset, id + '.tsv'), datafmt)
+        self.seq_df = read_data(osp.join('data', dataset, id + '.tsv'), datafmt)
         self.min_cluster_size = max(int(cluster_frac * len(self.seq_df)), 5)
+        self.sample_num = sample_num
         self.clusters = []           # List of lists of sequence indices.
         self.clustered_seqs = set()  # Union of sequence indices in clusters.
 
+        # Perform sampling, if applicable.
+        if self.sample_num is not None:
+            idxs = list(self.seq_df.index)
+            probs = list(self.seq_df['count'] / self.seq_df['count'].sum())
+            idxs = rng.choice(idxs, size=sample_size, replace=False, p=probs)
+            self.seq_df = self.seq_df.loc[idxs]
 
-    def find_clusters(self, verbose=True):
+
+    def find_clusters(self):
         """
         Finds all clusters in the ClusterSet's sequence data that contain at
         least the given fraction of total sequences.
-
-        :param verbose: True iff progress info should be printed
         """
-        self.clusters = dbscan(self.seq_df, self.min_cluster_size, verbose)
+        self.clusters = dbscan(self.seq_df, self.min_cluster_size)
         for cluster in self.clusters:
             self.clustered_seqs |= set(cluster)
 
@@ -171,32 +143,27 @@ class ClusterSet:
         """
         :returns: a string description of this ClusterSet
         """
-        return '\"' + self.dataset + '/' + self.id + '\" has ' + \
-               '{} clusters clustering {} of {} total sequences'\
-               .format(len(self.clusters), len(self.clustered_seqs), \
-                       len(self.seq_df))
+        info = '\"' + self.dataset + '/'
+        info += 'full/' if self.sample_num is None else \
+                'sample' + str(self.sample_num) + '/'
+        info += self.id + '\" has {} clusters clustering {} of {} sequences'\
+                .format(len(self.clusters), len(self.clustered_seqs), \
+                        len(self.seq_df))
+        return info
 
 
     def save(self):
         """
-        Saves this ClusterSet object to clusters/<dataset>/<id>.pkl.
+        Saves this ClusterSet object to clusters/<dataset>/<sample>/<id>.pkl.
         """
-        with open(join('clusters', self.dataset, self.id + '.pkl'), 'wb') as f:
-            pickle.dump(self, f)
+        sample_str = 'full' if self.sample_num is None else \
+                     'sample' + str(self.sample_num)
+        fname = osp.join('clusters', self.dataset, sample_str, self.id + '.pkl')
+        dump_obj(fname, self)
 
 
-def load_clusterset(fname):
-    """
-    Loads a ClusterSet from the given file.
-
-    :param fname: a string file name to load the ClusterSet from
-    :returns: the ClusterSet loaded from file
-    """
-    with open(fname, 'rb') as f:
-        return pickle.load(f)
-
-
-def cluster_one(id, dataset, datafmt, cluster_frac, verbose=True):
+def cluster_one(id, dataset, datafmt, cluster_frac, num_samples, sample_size, \
+                seed, verbose=True):
     """
     Perform clustering on the given individual, writing results to file.
 
@@ -205,15 +172,26 @@ def cluster_one(id, dataset, datafmt, cluster_frac, verbose=True):
     :param datafmt: a string data format ('esponda2020' or 'emerson2017')
     :param cluster_frac: a float threshold for minimum cluster size in terms of
     the total number of sequences
+    :param num_samples: an int number of samples to generate
+    :param sample_size: an int number of sequences per sample
+    :param seed: an int seed for random number generation
     :param verbose: True iff progress info should be printed
     """
-    cs = ClusterSet(id, dataset, datafmt, cluster_frac)
-    cs.find_clusters(verbose)
-    tqdm.write(cs.info())
-    cs.save()
+    # First, cluster the individual's entire repertoire; then generate and
+    # cluster repertoire samples.
+    rng = np.random.default_rng(seed)
+    pbar = trange(num_samples + 1)
+    for i in pbar:
+        sample_str = 'full' if i == 0 else 'sample' + str(i)
+        pbar.set_description('Clustering ' + sample_str)
+        cs = ClusterSet(id, dataset, datafmt, cluster_frac) if i == 0 else \
+             ClusterSet(id, dataset, datafmt, cluster_frac, i, sample_size, rng)
+        cs.find_clusters()
+        tqdm.write(cs.info())
+        cs.save()
 
 
-def cluster_all(dataset, datafmt, cluster_frac):
+def cluster_all(dataset, datafmt, cluster_frac, num_samples, sample_size, seed):
     """
     Iteratively find clusters for all individuals in the given dataset.
 
@@ -221,14 +199,20 @@ def cluster_all(dataset, datafmt, cluster_frac):
     :param datafmt: a string data format ('esponda2020' or 'emerson2017')
     :param cluster_frac: a float threshold for minimum cluster size in terms of
     the total number of sequences
+    :param num_samples: an int number of samples to generate
+    :param sample_size: an int number of sequences per sample
+    :param seed: an int seed for random number generation
     """
-    files = listdir(join('data', dataset))
-    verbose = len(files) == 1
-    pbar = tqdm(files)
-    for f in pbar:
-        id = f.split('.')[0]
+    # Get list of all individuals and generate a random seed for each.
+    ids = [f.split('.')[0] for f in os.listdir(osp.join('data', dataset))]
+    id_seeds = np.random.default_rng(seed).integers(0, 2**32, size=len(ids))
+
+    # Cluster each individual.
+    pbar = tqdm(ids)  # TODO: May want to do tqdm differently with samples.
+    for i, id in enumerate(pbar):
         pbar.set_description('Clustering ' + id)
-        cluster_one(id, dataset, datafmt, cluster_frac, verbose)
+        cluster_one(id, dataset, datafmt, cluster_frac, num_samples, \
+                    sample_size, id_seeds[i])
 
 
 if __name__ == "__main__":
@@ -242,9 +226,17 @@ if __name__ == "__main__":
                         help='Format of the sequencing data')
     parser.add_argument('-C', '--cluster_frac', type=float, default=0.001, \
                         help='Minimum cluster size as fraction of #sequences')
+    parser.add_argument('-N', '--num_samples', type=int, default=0, \
+                        help='Number of samples to generate')
+    parser.add_argument('-S', '--sample_size', type=int, default=41000, \
+                        help='Number of sequences per sample')
+    parser.add_argument('-R', '--rand_seed', type=int, default=None, \
+                        help='Seed for random number generation')
     args = parser.parse_args()
 
     if args.id == 'all':  # Cluster all individuals in the given dataset.
-        cluster_all(args.dataset, args.datafmt, args.cluster_frac)
+        cluster_all(args.dataset, args.datafmt, args.cluster_frac, \
+                    args.num_samples, args.sample_size, args.rand_seed)
     else:  # Cluster a single individual.
-        cluster_one(args.id, args.dataset, args.datafmt, args.cluster_frac)
+        cluster_one(args.id, args.dataset, args.datafmt, args.cluster_frac, \
+                    args.num_samples, args.sample_size, args.rand_seed)

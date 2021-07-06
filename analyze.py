@@ -1,7 +1,7 @@
-# Project:   PublicClusters
-# Filename:  analyze.py
-# Authors:   Fernando Esponda (fernando.esponda@itam.mx) and Joshua J. Daymude
-#            (jdaymude@asu.edu).
+# Project:  PublicClusters
+# Filename: analyze.py
+# Authors:  Fernando Esponda (fernando.esponda@itam.mx) and Joshua J. Daymude
+#           (jdaymude@asu.edu).
 
 """
 analyze: Compute metrics regarding repertoire clusters and matches.
@@ -12,8 +12,6 @@ analyze: Compute metrics regarding repertoire clusters and matches.
 # Figure 5: Anomaly Detection using EMD
 
 from match import *
-
-import numpy as np
 
 
 def traverse_matches(matches1, matches2, cluster, clusters1, clusters2, \
@@ -107,15 +105,15 @@ def cluster_size_pearson(dataset):
     pearson = {}
 
     # Load the matches dict from file.
-    with open(join('matches', dataset + '.pkl'), 'rb') as f:
+    with open(osp.join('matches', dataset + '.pkl'), 'rb') as f:
         matches = pickle.load(f)
 
     for f_i in matches:
-        cset_i = load_clusterset(join('clusters', dataset, f_i))
+        cset_i = load_obj(osp.join('clusters', dataset, f_i))
         pearson[f_i] = {f_i : 1.0}  # Perfectly correlated with itself.
 
         for f_j in matches[f_i]:
-            cset_j = load_clusterset(join('clusters', dataset, f_j))
+            cset_j = load_obj(osp.join('clusters', dataset, f_j))
             matches_ij = matches[f_i][f_j]['matches']
             matches_ji = matches[f_j][f_i]['matches']
 
@@ -158,11 +156,11 @@ def cluster_stats(dataset):
                            # clusters in clusters_i missing from clusters_j.
 
     # Load the matches dict from file.
-    with open(join('matches', dataset + '.pkl'), 'rb') as f:
+    with open(osp.join('matches', dataset + '.pkl'), 'rb') as f:
         matches = pickle.load(f)
 
     for f_i in matches:
-        cset_i = load_clusterset(join('clusters', dataset, f_i))
+        cset_i = load_obj(osp.join('clusters', dataset, f_i))
         num_clusters[f_i] = len(cset_i.clusters)
         num_seqs[f_i] = {'clustered': len(cset_i.clustered_seqs), \
                          'unclustered': len(cset_i.seq_df) \

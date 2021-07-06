@@ -1,7 +1,7 @@
-# Project:   PublicClusters
-# Filename:  match.py
-# Authors:   Fernando Esponda (fernando.esponda@itam.mx) and Joshua J. Daymude
-#            (jdaymude@asu.edu).
+# Project:  PublicClusters
+# Filename: match.py
+# Authors:  Fernando Esponda (fernando.esponda@itam.mx) and Joshua J. Daymude
+#           (jdaymude@asu.edu).
 
 """
 match: Match clusters from distinct individuals.
@@ -12,8 +12,6 @@ from cluster import *
 from collections import defaultdict
 from itertools import combinations
 import multiprocessing as mp
-import numpy as np
-import os
 
 
 def generate_nbr_seqs(amino_seq, dist_metric='Hamming'):
@@ -132,8 +130,8 @@ def match_pairs(dataset, file_pairs, queue):
     """
     matches = defaultdict(dict)
     for f_i, f_j in tqdm(file_pairs, desc='PID{} Matching'.format(os.getpid())):
-        cset_i = load_clusterset(join('clusters', dataset, f_i))
-        cset_j = load_clusterset(join('clusters', dataset, f_j))
+        cset_i = load_obj(osp.join('clusters', dataset, f_i))
+        cset_j = load_obj(osp.join('clusters', dataset, f_j))
         matches_ij, missing_ij = match_clusters(cset_i, cset_j)
         matches[f_i][f_j] = {'matches': matches_ij, 'missing': missing_ij}
 
@@ -151,7 +149,7 @@ def match_all(dataset, num_procs=1):
     names to dicts containing the matching and missing clusters for this pair
     """
     # Partition pairs of file indices to match on over the number of processors.
-    files = listdir(join('clusters', dataset))
+    files = os.listdir(osp.join('clusters', dataset))
     file_pairs = [pair for pair in combinations(files, r=2)]
     file_pair_chunks = np.array_split(file_pairs, num_procs)
 
@@ -178,7 +176,7 @@ def match_all(dataset, num_procs=1):
 
     # For efficiency, use symmetry and inversion to get the remaining matches.
     for i, f_i in enumerate(files):
-        cset_i = load_clusterset(join('clusters', dataset, files[i]))
+        cset_i = load_obj(osp.join('clusters', dataset, files[i]))
         for j, f_j in enumerate(files):
             if i > j:
                 matches_ji = matches[f_j][f_i]['matches']
@@ -187,7 +185,7 @@ def match_all(dataset, num_procs=1):
                 matches[f_i][f_j] = {'matches':matches_ij, 'missing':missing_ij}
 
     # Write the matches to file before returning them.
-    with open(join('matches', dataset + '.pkl'), 'wb') as f:
+    with open(osp.join('matches', dataset + '.pkl'), 'wb') as f:
         pickle.dump(matches, f)
 
     return matches
