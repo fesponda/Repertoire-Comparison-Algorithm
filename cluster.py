@@ -10,6 +10,7 @@ cluster: Cluster repertoires of amino acid sequences.
 from helper import *
 
 import argparse
+import multiprocessing as mp
 import numpy as np
 from tqdm import tqdm, trange
 
@@ -162,36 +163,36 @@ class ClusterSet:
         dump_obj(fname, self)
 
 
-def cluster_one(id, dataset, datafmt, cluster_frac, num_samples, sample_size, \
-                seed, verbose=True):
+def cluster_chunk(ids_chunk, seeds_chunk, dataset, datafmt, cluster_frac, \
+                  num_samples, sample_size):
     """
-    Perform clustering on the given individual, writing results to file.
+    Perform clustering on a chunk of individuals, writing results to file.
 
-    :param id: a string identifier for the individual
+    :param ids_chunk: a list of string identifiers for individuals
+    :param id_seeds_chunk: a list of int seeds for random number generation
     :param dataset: a string dataset name
     :param datafmt: a string data format ('esponda2020' or 'emerson2017')
     :param cluster_frac: a float threshold for minimum cluster size in terms of
     the total number of sequences
     :param num_samples: an int number of samples to generate
     :param sample_size: an int number of sequences per sample
-    :param seed: an int seed for random number generation
-    :param verbose: True iff progress info should be printed
     """
     # First, cluster the individual's entire repertoire; then generate and
     # cluster repertoire samples.
-    rng = np.random.default_rng(seed)
-    pbar = trange(num_samples + 1)
-    for i in pbar:
-        sample_str = 'full' if i == 0 else 'sample' + str(i)
-        pbar.set_description('Clustering ' + sample_str)
-        cs = ClusterSet(id, dataset, datafmt, cluster_frac) if i == 0 else \
-             ClusterSet(id, dataset, datafmt, cluster_frac, i, sample_size, rng)
-        cs.find_clusters()
-        tqdm.write(cs.info())
-        cs.save()
+    pbar = tqdm(list(zip(ids_chunk, seeds_chunk)))
+    for id, seed in pbar:
+        pbar.set_description('PID{} clustering {}'.format(os.getpid(), id))
+        rng = np.random.default_rng(seed)
+        for i in range(num_samples + 1):
+            cs = ClusterSet(id, dataset, datafmt, cluster_frac) if i == 0 else \
+                 ClusterSet(id, dataset, datafmt, cluster_frac, i, sample_size, rng)
+            cs.find_clusters()
+            tqdm.write(cs.info())
+            cs.save()
 
 
-def cluster_all(dataset, datafmt, cluster_frac, num_samples, sample_size, seed):
+def cluster_all(dataset, datafmt, cluster_frac, num_samples, sample_size, seed,\
+                num_procs=1):
     """
     Iteratively find clusters for all individuals in the given dataset.
 
@@ -202,24 +203,33 @@ def cluster_all(dataset, datafmt, cluster_frac, num_samples, sample_size, seed):
     :param num_samples: an int number of samples to generate
     :param sample_size: an int number of sequences per sample
     :param seed: an int seed for random number generation
+    :param num_procs: an int number of processors to parallelize over
     """
     # Get list of all individuals and generate a random seed for each.
     ids = [f.split('.')[0] for f in os.listdir(osp.join('data', dataset))]
-    id_seeds = np.random.default_rng(seed).integers(0, 2**32, size=len(ids))
+    seeds = np.random.default_rng(seed).integers(0, 2**32, size=len(ids))
 
-    # Cluster each individual.
-    pbar = tqdm(ids)  # TODO: May want to do tqdm differently with samples.
-    for i, id in enumerate(pbar):
-        pbar.set_description('Clustering ' + id)
-        cluster_one(id, dataset, datafmt, cluster_frac, num_samples, \
-                    sample_size, id_seeds[i])
+    # Partition these lists over the number of processors.
+    ids_chunks = np.array_split(ids, num_procs)
+    seeds_chunks = np.array_split(seeds, num_procs)
+
+    # Start all processes, clustering each individual and their samples.
+    procs = []
+    for ids_chunk, seeds_chunk in zip(ids_chunks, seeds_chunks):
+        proc = mp.Process(target=cluster_chunk, args=(ids_chunk, seeds_chunk, \
+                          dataset, datafmt, cluster_frac, num_samples, \
+                          sample_size,))
+        proc.start()
+        procs.append(proc)
+
+    # Wait until all processes have finished.
+    for proc in procs:
+        proc.join()
 
 
 if __name__ == "__main__":
     # Parse command line arguments.
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('-I', '--id', type=str, default='all', \
-                        help='ID of individual to cluster or \'all\'')
     parser.add_argument('-D', '--dataset', type=str, required=True, \
                         help='Dataset to perform clustering on')
     parser.add_argument('-F', '--datafmt', type=str, required=True, \
@@ -232,11 +242,10 @@ if __name__ == "__main__":
                         help='Number of sequences per sample')
     parser.add_argument('-R', '--rand_seed', type=int, default=None, \
                         help='Seed for random number generation')
+    parser.add_argument('-P', '--num_procs', type=int, default=1, \
+                        help='Number of processors to parallelize over')
     args = parser.parse_args()
 
-    if args.id == 'all':  # Cluster all individuals in the given dataset.
-        cluster_all(args.dataset, args.datafmt, args.cluster_frac, \
-                    args.num_samples, args.sample_size, args.rand_seed)
-    else:  # Cluster a single individual.
-        cluster_one(args.id, args.dataset, args.datafmt, args.cluster_frac, \
-                    args.num_samples, args.sample_size, args.rand_seed)
+    cluster_all(args.dataset, args.datafmt, args.cluster_frac, \
+                args.num_samples, args.sample_size, args.rand_seed, \
+                args.num_procs)

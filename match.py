@@ -11,7 +11,6 @@ from cluster import *
 
 from collections import defaultdict
 from itertools import combinations
-import multiprocessing as mp
 
 
 def generate_nbr_seqs(amino_seq, dist_metric='Hamming'):
